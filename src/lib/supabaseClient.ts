@@ -1,13 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// Lê as variáveis de ambiente
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Se as variáveis não existirem, joga um erro claro no server
-if (!supabaseUrl || !supabaseAnonKey) {
+// Se não tiver, lança erro claro (foi o que você viu no build)
+if (!supabaseUrl || !supabaseKey) {
   throw new Error(
     "Variáveis de ambiente do Supabase não configuradas. Verifique NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY."
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Cliente compartilhado pela aplicação
+export const supabase = createClient(supabaseUrl, supabaseKey);
