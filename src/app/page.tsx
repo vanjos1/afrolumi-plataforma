@@ -1,315 +1,510 @@
 "use client";
-import React, { useEffect, useMemo, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+
+import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Download, Upload, Plus, Trash2, Save, BookOpenText, Sparkles, CheckCircle2 } from "lucide-react";
+import { Download, Save, Sparkles, Trash2 } from "lucide-react";
 
-// --- TIPOS E ESTADO ---
-type Milestone = { id: string; fase: string; acontecimento: string; sentimento: string; };
-type Eixo1Data = {
-  linhaVida: Milestone[];
+// ========================= TIPOS =========================
+
+interface LinhaVidaEtapa {
+  fase: string;
+  acontecimento: string;
+  sentimento: string;
+}
+
+interface MapaIdentidade {
+  valores: string;
+  talentos: string;
+  conquistas: string;
+  dores: string;
+  sonhos: string;
+}
+
+interface Eixo1 {
+  linhaVida: LinhaVidaEtapa[];
+  mapaIdentidade: MapaIdentidade;
   cartaGratidao: string;
-  mapaIdentidade: { raizes: string; corpo: string; voz: string; sonhos: string; fe: string; reflexaoFinal: string; };
-};
-type AppData = {
-  participante: { nome: string };
-  eixo1: Eixo1Data;
-  eixo2?: Record<string, any>; eixo3?: Record<string, any>; eixo4?: Record<string, any>;
-  eixo5?: Record<string, any>; eixo6?: Record<string, any>; eixo7?: Record<string, any>; eixo8?: Record<string, any>;
-};
+}
 
-const STORAGE_KEY = "afrolumi_plataforma_v1";
+interface Participante {
+  nome: string;
+  email: string;
+  telefone: string;
+}
+
+interface AppData {
+  participante: Participante;
+  eixo1: Eixo1;
+}
+
+// ========================= CONSTANTES =========================
+
+const STORAGE_KEY = "afrolumi_app_data";
+
 const defaultData: AppData = {
-  participante: { nome: "" },
+  participante: { nome: "", email: "", telefone: "" },
   eixo1: {
     linhaVida: [
-      { id: crypto.randomUUID(), fase: "Infância", acontecimento: "", sentimento: "" },
-      { id: crypto.randomUUID(), fase: "Juventude", acontecimento: "", sentimento: "" },
-      { id: crypto.randomUUID(), fase: "Vida adulta", acontecimento: "", sentimento: "" },
+      { fase: "Infância", acontecimento: "", sentimento: "" },
+      { fase: "Juventude", acontecimento: "", sentimento: "" },
+      { fase: "Vida adulta", acontecimento: "", sentimento: "" },
     ],
+    mapaIdentidade: {
+      valores: "",
+      talentos: "",
+      conquistas: "",
+      dores: "",
+      sonhos: "",
+    },
     cartaGratidao: "",
-    mapaIdentidade: { raizes: "", corpo: "", voz: "", sonhos: "", fe: "", reflexaoFinal: "" },
   },
 };
 
-// --- HOOK LOCALSTORAGE ---
+// ========================= HOOK useLocalState =========================
+// Versão ajustada para evitar erro de hidratação (SSR x cliente)
+
 function useLocalState<T>(key: string, initial: T) {
-  const [state, setState] = useState<T>(() => {
-    try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) as T : initial; } catch { return initial; }
-  });
-  useEffect(() => { localStorage.setItem(key, JSON.stringify(state)); }, [key, state]);
+  const [state, setState] = useState<T>(initial);
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  // Carregar do localStorage depois que o componente monta no cliente
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        setState(JSON.parse(raw) as T);
+      }
+    } catch {
+      // se der erro ao ler, segue com o initial
+    } finally {
+      setHasHydrated(true);
+    }
+  }, [key]);
+
+  // Salvar no localStorage sempre que o estado mudar (depois da hidratação)
+  useEffect(() => {
+    if (!hasHydrated || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // se der erro de quota, ignoramos
+    }
+  }, [key, state, hasHydrated]);
+
   return [state, setState] as const;
 }
 
-// --- UI REUTILIZÁVEL ---
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <div className="mb-4">
-      <h2 className="text-2xl font-semibold tracking-tight text-amber-900">{title}</h2>
-      {subtitle && <p className="text-sm text-amber-700/80 mt-1">{subtitle}</p>}
-    </div>
-  );
-}
-function HelpNote({ children }: { children: React.ReactNode }) {
-  return <div className="text-sm p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">{children}</div>;
-}
-function Toolbar({ data, setData }: { data: AppData; setData: (d: AppData) => void }) {
-  const handleExport = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `afrolumi_${data.participante.nome || "participante"}.json`; a.click(); URL.revokeObjectURL(url);
-  };
-  const handleImport = () => {
-    const inp = document.createElement("input");
-    inp.type = "file"; inp.accept = "application/json";
-    inp.onchange = () => { const file = inp.files?.[0]; if (!file) return;
-      file.text().then((txt) => { try { setData(JSON.parse(txt)); } catch { alert("Arquivo inválido"); } });
-    };
-    inp.click();
-  };
-  const handleReset = () => { if (confirm("Tem certeza que deseja limpar os dados deste dispositivo?")) setData({ ...defaultData }); };
-  return (
-    <div className="flex flex-wrap gap-2 items-center">
-      <Button onClick={handleExport} variant="secondary" className="gap-2"><Download className="h-4 w-4"/>Exportar JSON</Button>
-      <Button onClick={handleImport} variant="secondary" className="gap-2"><Upload className="h-4 w-4"/>Importar JSON</Button>
-      <Button onClick={handleReset} variant="outline" className="gap-2"><Trash2 className="h-4 w-4"/>Limpar</Button>
-    </div>
-  );
-}
-function ProgressEixo1({ data }: { data: Eixo1Data }) {
-  const totalFields = 3 + data.linhaVida.length * 2 + 5;
-  const filled =
-    (data.cartaGratidao ? 1 : 0) +
-    (data.mapaIdentidade.reflexaoFinal ? 1 : 0) +
-    (data.mapaIdentidade.raizes ? 1 : 0) +
-    (data.mapaIdentidade.corpo ? 1 : 0) +
-    (data.mapaIdentidade.voz ? 1 : 0) +
-    (data.mapaIdentidade.sonhos ? 1 : 0) +
-    (data.mapaIdentidade.fe ? 1 : 0) +
-    data.linhaVida.reduce((acc, m) => acc + (m.acontecimento ? 1 : 0) + (m.sentimento ? 1 : 0), 0);
-  const value = Math.min(100, Math.round((filled / totalFields) * 100));
-  return (
-    <div className="space-y-1 w-full">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-amber-900">Progresso do Eixo 1</span>
-        <Badge variant="secondary" className="bg-amber-100 text-amber-900">{value}%</Badge>
-      </div>
-      <Progress value={value} className="h-2" />
-    </div>
-  );
-}
-function LinhaDeVida({ data, onChange }: { data: Milestone[]; onChange: (list: Milestone[]) => void }) {
-  const add = () => onChange([...data, { id: crypto.randomUUID(), fase: "", acontecimento: "", sentimento: "" }]);
-  const remove = (id: string) => onChange(data.filter(m => m.id !== id));
-  const edit = (id: string, patch: Partial<Milestone>) => onChange(data.map(m => m.id === id ? { ...m, ...patch } : m));
-  return (
-    <div className="space-y-3">
-      {data.map((m) => (
-        <Card key={m.id} className="border-amber-200/60 shadow-sm">
-          <CardContent className="p-4 grid md:grid-cols-12 gap-3">
-            <div className="md:col-span-3">
-              <label className="text-xs text-amber-800">Fase</label>
-              <Input value={m.fase} onChange={(e) => edit(m.id, { fase: e.target.value })} placeholder="Infância / Juventude / Vida adulta..." />
-            </div>
-            <div className="md:col-span-5">
-              <label className="text-xs text-amber-800">O que aconteceu</label>
-              <Input value={m.acontecimento} onChange={(e) => edit(m.id, { acontecimento: e.target.value })} placeholder="Ex.: Mudei de cidade, entrei na faculdade..." />
-            </div>
-            <div className="md:col-span-3">
-              <label className="text-xs text-amber-800">Como me senti</label>
-              <Input value={m.sentimento} onChange={(e) => edit(m.id, { sentimento: e.target.value })} placeholder="Ex.: medo, coragem, esperança..." />
-            </div>
-            <div className="md:col-span-1 flex items-end">
-              <Button variant="outline" onClick={() => remove(m.id)} className="w-full" title="Remover"><Trash2 className="h-4 w-4"/></Button>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-      <Button onClick={add} className="gap-2 bg-amber-900 hover:bg-amber-800"><Plus className="h-4 w-4"/>Adicionar etapa</Button>
-    </div>
-  );
-}
-function MapaIdentidade({ value, onChange }: { value: Eixo1Data["mapaIdentidade"]; onChange: (v: Eixo1Data["mapaIdentidade"]) => void }) {
-  const edit = (patch: Partial<Eixo1Data["mapaIdentidade"]>) => onChange({ ...value, ...patch });
-  return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <div>
-        <label className="text-sm font-medium text-amber-900">Raízes 🌿</label>
-        <Textarea rows={5} value={value.raizes} onChange={(e) => edit({ raizes: e.target.value })} placeholder="De onde venho e o que herdei"/>
-      </div>
-      <div>
-        <label className="text-sm font-medium text-amber-900">Corpo e Aparência 🌸</label>
-        <Textarea rows={5} value={value.corpo} onChange={(e) => edit({ corpo: e.target.value })} placeholder="Como me vejo e como o mundo me vê"/>
-      </div>
-      <div>
-        <label className="text-sm font-medium text-amber-900">Voz e Expressão 🔊</label>
-        <Textarea rows={5} value={value.voz} onChange={(e) => edit({ voz: e.target.value })} placeholder="O que digo, o que calo e o que desejo comunicar"/>
-      </div>
-      <div>
-        <label className="text-sm font-medium text-amber-900">Sonhos e Potências 🌞</label>
-        <Textarea rows={5} value={value.sonhos} onChange={(e) => edit({ sonhos: e.target.value })} placeholder="O que quero construir"/>
-      </div>
-      <div className="md:col-span-2">
-        <label className="text-sm font-medium text-amber-900">Fé ou Energia Vital 💫</label>
-        <Textarea rows={4} value={value.fe} onChange={(e) => edit({ fe: e.target.value })} placeholder="O que me sustenta, me conecta, me dá esperança"/>
-      </div>
-      <div className="md:col-span-2">
-        <label className="text-sm font-medium text-amber-900">Reflexão Final</label>
-        <Textarea rows={4} value={value.reflexaoFinal} onChange={(e) => edit({ reflexaoFinal: e.target.value })} placeholder="Quem sou eu quando ninguém me observa?"/>
-      </div>
-    </div>
-  );
-}
+// ========================= PÁGINA PRINCIPAL =========================
 
-// --- APP ---
 export default function AfrolumiPlataforma() {
   const [data, setData] = useLocalState<AppData>(STORAGE_KEY, defaultData);
   const [saved, setSaved] = useState(false);
-  useEffect(() => { setSaved(true); const t = setTimeout(() => setSaved(false), 1000); return () => clearTimeout(t); }, [data]);
-  const eixo1Progress = useMemo(() => <ProgressEixo1 data={data.eixo1} />, [data.eixo1]);
+  const [sending, setSending] = useState(false);
+  const [sendMessage, setSendMessage] = useState<string | null>(null);
+
+  // Controle visual de "Salvo!"
+  useEffect(() => {
+    setSaved(true);
+    const t = window.setTimeout(() => setSaved(false), 1200);
+    return () => window.clearTimeout(t);
+  }, [data]);
+
+  // ---------- Enviar para mentora (Supabase via /api/eixo1) ----------
+  const handleEnviarParaMentora = async () => {
+    if (!data.participante.nome) {
+      alert("Preencha o nome antes de enviar.");
+      return;
+    }
+
+    setSendMessage(null);
+
+    try {
+      setSending(true);
+
+      const res = await fetch("/api/eixo1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nome: data.participante.nome,
+          email: data.participante.email,
+          telefone: data.participante.telefone,
+          eixo1: data.eixo1,
+        }),
+      });
+
+      const body = await res
+        .json()
+        .catch(() => ({ ok: false, error: "Erro ao interpretar resposta." }));
+
+      if (!res.ok || body?.error) {
+        console.error("Erro ao enviar:", body);
+        setSendMessage(
+          body?.error || "Não foi possível enviar agora. Tente novamente."
+        );
+        return;
+      }
+
+      setSendMessage("Resposta enviada com sucesso para a mentora.");
+    } catch (e) {
+      console.error(e);
+      setSendMessage("Erro inesperado. Verifique sua conexão e tente novamente.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ========================= RENDER =========================
 
   return (
-    <div className="min-h-screen bg-amber-50/60">
-      {/* Header */}
-      <div className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-amber-50/70 border-b border-amber-200">
-        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-amber-900 grid place-items-center text-amber-50"><Sparkles className="h-5 w-5"/></div>
-            <div>
-              <h1 className="text-xl font-semibold text-amber-950 tracking-tight">AFROLUMI • Plataforma</h1>
-              <p className="text-xs text-amber-800">Caderno vivo de formação • Inclusivo e afrocentrado</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Input className="w-56" placeholder="Nome da participante" value={data.participante.nome} onChange={(e) => setData({ ...data, participante: { nome: e.target.value } })} />
-            <Toolbar data={data} setData={setData as any} />
-          </div>
+    <main className="min-h-screen bg-[#f8f4ec] text-zinc-900 p-4 md:p-10">
+      {/* Cabeçalho */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-6">
+        <div>
+          <h1 className="text-3xl font-bold text-amber-900">
+            AFROLUMI • Plataforma
+          </h1>
+          <p className="text-sm text-zinc-600">
+            Caderno vivo de formação • Inclusivo e afrocentrado
+          </p>
         </div>
-      </div>
 
-      {/* Body */}
-      <div className="mx-auto max-w-6xl px-4 py-6 grid lg:grid-cols-12 gap-6">
-        {/* Sidebar */}
-        <aside className="lg:col-span-3 space-y-3">
-          <Card className="border-amber-200/70">
-            <CardContent className="p-4 space-y-3">
-              <SectionHeader title="Navegação por Eixos"/>
-              <Tabs defaultValue="eixo1" className="w-full">
-                <TabsList className="grid grid-cols-1 gap-2 p-0 bg-transparent">
-                  {[
-                    ["eixo1", "Eixo 1 • Consciência"],
-                    ["eixo2", "Eixo 2 • Afeto"],
-                    ["eixo3", "Eixo 3 • Educação Libertadora"],
-                    ["eixo4", "Eixo 4 • Identidade e Corpo"],
-                    ["eixo5", "Eixo 5 • Potência Econômica"],
-                    ["eixo6", "Eixo 6 • Comunidade"],
-                    ["eixo7", "Eixo 7 • Espiritualidade e Ancestralidade"],
-                    ["eixo8", "Eixo 8 • Expressão e Voz"],
-                  ].map(([val, label]) => (
-                    <TabsTrigger key={val} value={val as string} className="justify-start data-[state=active]:bg-amber-900 data-[state=active]:text-amber-50">
-                      {label as string}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          <Card className="border-amber-200/70">
-            <CardContent className="p-4 space-y-3">
-              <SectionHeader title="Status"/>
-              {eixo1Progress}
-              <div className="text-xs text-amber-800 flex items-center gap-2 mt-1">
-                <CheckCircle2 className={`h-4 w-4 ${saved ? "opacity-100" : "opacity-0"}`} />
-                <span className={`${saved ? "opacity-100" : "opacity-0"}`}>Alterações salvas</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-amber-200/70">
-            <CardContent className="p-4 space-y-2">
-              <SectionHeader title="Nota de Inclusão"/>
-              <HelpNote>
-                Aqui, cada mulher é convidada a se conectar com sua história e sua luz interior. Algumas chamam isso de fé, outras de ancestralidade, outras de força divina. No AFROLUMI, todas as formas de conexão com o sagrado são bem-vindas.
-              </HelpNote>
-            </CardContent>
-          </Card>
-        </aside>
-
-        {/* Main */}
-        <main className="lg:col-span-9 space-y-6">
-          {/* Eixo 1 */}
-          <Card className="border-amber-200/70">
-            <CardContent className="p-6 space-y-6">
-              <div className="flex items-center gap-3">
-                <BookOpenText className="h-5 w-5 text-amber-900"/>
-                <h2 className="text-xl font-semibold text-amber-950">Eixo 1 • Consciência — O Despertar da Mulher Negra</h2>
-              </div>
-              <p className="text-sm text-amber-900/90 leading-relaxed">
-                O despertar da consciência é o ato de lembrar quem somos e de onde viemos — sem impor dogmas. Nesta etapa, ancestralidade é memória e transmissão de valores; fé é energia vital que sustenta a caminhada. Toda expressão de espiritualidade é acolhida.
-              </p>
-
-              {/* Linha de Vida */}
-              <SectionHeader title="Ferramenta 1 — Linha de Vida Ancestral" subtitle="(também chamada Linha da Vida Pessoal e Familiar)"/>
-              <HelpNote>Marque etapas significativas da sua história. Para cada etapa, descreva o que aconteceu e como se sentiu. Você pode adicionar quantas etapas quiser.</HelpNote>
-              <LinhaDeVida
-                data={data.eixo1.linhaVida}
-                onChange={(list) => setData({ ...data, eixo1: { ...data.eixo1, linhaVida: list } })}
-              />
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-amber-900">Carta de Gratidão</label>
-                <Textarea
-                  rows={6}
-                  placeholder="Escreva uma carta para si e para as mulheres que abriram caminho na sua história."
-                  value={data.eixo1.cartaGratidao}
-                  onChange={(e) => setData({ ...data, eixo1: { ...data.eixo1, cartaGratidao: e.target.value } })}
-                />
-              </div>
-
-              {/* Mapa da Identidade */}
-              <SectionHeader title="Ferramenta 2 — Mapa da Identidade" subtitle="(Mapa de Mim)"/>
-              <HelpNote>Preencha as áreas abaixo com palavras, frases, símbolos ou colagens digitais (texto). Quem é você quando ninguém observa? O que é essencial em você e não pode ser apagado?</HelpNote>
-              <MapaIdentidade
-                value={data.eixo1.mapaIdentidade}
-                onChange={(v) => setData({ ...data, eixo1: { ...data.eixo1, mapaIdentidade: v } })}
-              />
-
-              <div className="flex gap-3 pt-1">
-                <Button className="gap-2 bg-amber-900 hover:bg-amber-800" onClick={() => window.print()}>
-                  <Download className="h-4 w-4"/> Imprimir / Salvar PDF
-                </Button>
-                <Button variant="outline" className="gap-2" onClick={() => localStorage.setItem(STORAGE_KEY, JSON.stringify(data))}>
-                  <Save className="h-4 w-4"/> Salvar agora
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Placeholders dos próximos Eixos */}
-          {[2,3,4,5,6,7,8].map((n) => (
-            <Card key={n} className="border-amber-200/70">
-              <CardContent className="p-6 space-y-2">
-                <h3 className="text-lg font-semibold text-amber-950">Eixo {n} • Em construção</h3>
-                <p className="text-sm text-amber-900/80">Estrutura pronta para inserir ferramentas e conteúdo do Eixo {n}. Assim que definirmos as atividades, adicionaremos formulários e instruções aqui.</p>
-              </CardContent>
-            </Card>
-          ))}
-        </main>
-      </div>
-
-      {/* Footer */}
-      <footer className="border-t border-amber-200">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-sm text-amber-800 flex flex-wrap items-center justify-between gap-2">
-          <span>AFROLUMI • Metodologia Inclusiva • © {new Date().getFullYear()} Karla Calazans</span>
-          <span>Base inspirada em bell hooks • Design: tons terrosos • Privacidade: dados ficam no seu dispositivo</span>
+        {/* Dados da participante */}
+        <div className="flex flex-col gap-2 w-full md:w-80">
+          <Input
+            placeholder="Nome"
+            value={data.participante.nome}
+            onChange={(e) =>
+              setData({
+                ...data,
+                participante: { ...data.participante, nome: e.target.value },
+              })
+            }
+          />
+          <Input
+            placeholder="E-mail"
+            value={data.participante.email}
+            onChange={(e) =>
+              setData({
+                ...data,
+                participante: { ...data.participante, email: e.target.value },
+              })
+            }
+          />
+          <Input
+            placeholder="Telefone (WhatsApp)"
+            value={data.participante.telefone}
+            onChange={(e) =>
+              setData({
+                ...data,
+                participante: { ...data.participante, telefone: e.target.value },
+              })
+            }
+          />
         </div>
-      </footer>
-    </div>
+      </header>
+
+      {/* Conteúdo principal */}
+      <div className="bg-white shadow rounded-lg p-6 space-y-10">
+        {/* Eixo 1 - Introdução */}
+        <section>
+          <h2 className="text-2xl font-bold text-amber-800">
+            Eixo 1 • Consciência — O Despertar da Mulher Negra
+          </h2>
+          <p className="text-sm text-zinc-600 mt-2">
+            O despertar da consciência é lembrar quem somos e de onde viemos —
+            sem impor crenças. Cada história carrega força, dignidade e memória.
+          </p>
+        </section>
+
+        {/* Ferramenta 1: Linha de Vida Ancestral */}
+        <section className="space-y-4">
+          <h3 className="text-xl font-semibold text-amber-700">
+            Ferramenta 1 — Linha de Vida Ancestral
+          </h3>
+
+          <p className="text-sm text-zinc-600">
+            Registre momentos importantes da sua vida e como eles contribuíram
+            para quem você é.
+          </p>
+
+          {data.eixo1.linhaVida.map(
+            (etapa: LinhaVidaEtapa, idx: number) => (
+              <div
+                key={idx}
+                className="border rounded-md p-4 bg-amber-50 mb-3 space-y-2"
+              >
+                <div className="flex flex-col md:flex-row gap-3">
+                  {/* Fase */}
+                  <Input
+                    placeholder="Fase"
+                    value={etapa.fase}
+                    onChange={(e) => {
+                      const nova = [...data.eixo1.linhaVida];
+                      nova[idx].fase = e.target.value;
+                      setData({
+                        ...data,
+                        eixo1: { ...data.eixo1, linhaVida: nova },
+                      });
+                    }}
+                    className="w-full"
+                  />
+
+                  {/* Acontecimento */}
+                  <Input
+                    placeholder="O que aconteceu"
+                    value={etapa.acontecimento}
+                    onChange={(e) => {
+                      const nova = [...data.eixo1.linhaVida];
+                      nova[idx].acontecimento = e.target.value;
+                      setData({
+                        ...data,
+                        eixo1: { ...data.eixo1, linhaVida: nova },
+                      });
+                    }}
+                    className="w-full"
+                  />
+
+                  {/* Sentimento */}
+                  <Input
+                    placeholder="Como me senti"
+                    value={etapa.sentimento}
+                    onChange={(e) => {
+                      const nova = [...data.eixo1.linhaVida];
+                      nova[idx].sentimento = e.target.value;
+                      setData({
+                        ...data,
+                        eixo1: { ...data.eixo1, linhaVida: nova },
+                      });
+                    }}
+                    className="w-full"
+                  />
+
+                  {/* Remover */}
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      const nova = [...data.eixo1.linhaVida];
+                      nova.splice(idx, 1);
+                      setData({
+                        ...data,
+                        eixo1: { ...data.eixo1, linhaVida: nova },
+                      });
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )
+          )}
+
+          {/* Adicionar Etapa */}
+          <Button
+            className="bg-amber-800 hover:bg-amber-700"
+            onClick={() => {
+              const nova = [...data.eixo1.linhaVida];
+              nova.push({
+                fase: "",
+                acontecimento: "",
+                sentimento: "",
+              });
+              setData({
+                ...data,
+                eixo1: { ...data.eixo1, linhaVida: nova },
+              });
+            }}
+          >
+            + Adicionar etapa
+          </Button>
+        </section>
+
+        {/* Ferramenta 2: Mapa da Identidade */}
+        <section className="space-y-4">
+          <h3 className="text-xl font-semibold text-amber-700">
+            Ferramenta 2 — Mapa da Identidade
+          </h3>
+
+          <textarea
+            placeholder="Meus valores"
+            value={data.eixo1.mapaIdentidade.valores}
+            onChange={(e) =>
+              setData({
+                ...data,
+                eixo1: {
+                  ...data.eixo1,
+                  mapaIdentidade: {
+                    ...data.eixo1.mapaIdentidade,
+                    valores: e.target.value,
+                  },
+                },
+              })
+            }
+            className="border rounded w-full p-3 h-24"
+          />
+
+          <textarea
+            placeholder="Meus talentos"
+            value={data.eixo1.mapaIdentidade.talentos}
+            onChange={(e) =>
+              setData({
+                ...data,
+                eixo1: {
+                  ...data.eixo1,
+                  mapaIdentidade: {
+                    ...data.eixo1.mapaIdentidade,
+                    talentos: e.target.value,
+                  },
+                },
+              })
+            }
+            className="border rounded w-full p-3 h-24"
+          />
+
+          <textarea
+            placeholder="Minhas conquistas"
+            value={data.eixo1.mapaIdentidade.conquistas}
+            onChange={(e) =>
+              setData({
+                ...data,
+                eixo1: {
+                  ...data.eixo1,
+                  mapaIdentidade: {
+                    ...data.eixo1.mapaIdentidade,
+                    conquistas: e.target.value,
+                  },
+                },
+              })
+            }
+            className="border rounded w-full p-3 h-24"
+          />
+
+          <textarea
+            placeholder="Minhas dores"
+            value={data.eixo1.mapaIdentidade.dores}
+            onChange={(e) =>
+              setData({
+                ...data,
+                eixo1: {
+                  ...data.eixo1,
+                  mapaIdentidade: {
+                    ...data.eixo1.mapaIdentidade,
+                    dores: e.target.value,
+                  },
+                },
+              })
+            }
+            className="border rounded w-full p-3 h-24"
+          />
+
+          <textarea
+            placeholder="Meus sonhos"
+            value={data.eixo1.mapaIdentidade.sonhos}
+            onChange={(e) =>
+              setData({
+                ...data,
+                eixo1: {
+                  ...data.eixo1,
+                  mapaIdentidade: {
+                    ...data.eixo1.mapaIdentidade,
+                    sonhos: e.target.value,
+                  },
+                },
+              })
+            }
+            className="border rounded w-full p-3 h-24"
+          />
+        </section>
+
+        {/* Carta de Gratidão */}
+        <section className="space-y-2">
+          <h3 className="text-xl font-semibold text-amber-700">
+            Carta de Gratidão
+          </h3>
+          <textarea
+            placeholder="Escreva uma carta para si e para as mulheres que abriram caminho para sua história florescer."
+            value={data.eixo1.cartaGratidao}
+            onChange={(e) =>
+              setData({
+                ...data,
+                eixo1: {
+                  ...data.eixo1,
+                  cartaGratidao: e.target.value,
+                },
+              })
+            }
+            className="border rounded w-full p-3 h-32"
+          />
+        </section>
+
+        {/* Botões finais */}
+        <div className="flex flex-wrap gap-3 pt-1">
+          {/* Imprimir */}
+          <Button
+            className="gap-2 bg-amber-900 hover:bg-amber-800"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.print();
+              }
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Imprimir / Salvar PDF
+          </Button>
+
+          {/* Salvar Agora */}
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => {
+              try {
+                window.localStorage.setItem(
+                  STORAGE_KEY,
+                  JSON.stringify(data)
+                );
+              } catch {
+                //
+              }
+              setSaved(true);
+            }}
+          >
+            <Save className="h-4 w-4" />
+            Salvar agora
+          </Button>
+
+          {/* Enviar para mentora */}
+          <Button
+            variant="secondary"
+            disabled={sending || !data.participante.nome}
+            className="gap-2"
+            onClick={handleEnviarParaMentora}
+          >
+            <Sparkles className="h-4 w-4" />
+            {sending ? "Enviando..." : "Enviar para mentora"}
+          </Button>
+        </div>
+
+        {/* Mensagens de status */}
+        {saved && (
+          <p className="text-xs text-green-600 pt-2">
+            Alterações salvas neste dispositivo.
+          </p>
+        )}
+
+        {sendMessage && (
+          <p
+            className={`text-xs pt-1 ${
+              sendMessage.toLowerCase().includes("sucesso")
+                ? "text-green-600"
+                : "text-red-600"
+            }`}
+          >
+            {sendMessage}
+          </p>
+        )}
+      </div>
+    </main>
   );
 }
