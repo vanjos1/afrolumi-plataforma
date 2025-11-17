@@ -115,7 +115,8 @@ export default function AfrolumiPlataforma() {
   // ---------- Enviar para mentora (Supabase via /api/eixo1) ----------
   const handleEnviarParaMentora = async () => {
     if (!data.participante.nome) {
-      alert("Preencha o nome antes de enviar.");
+      // Usando setSendMessage em vez de alert()
+      setSendMessage("Preencha o nome antes de enviar.");
       return;
     }
 
@@ -135,15 +136,26 @@ export default function AfrolumiPlataforma() {
         }),
       });
 
+      // Tenta ler o body. Se falhar, retorna um erro genérico para body.
       const body = await res
         .json()
-        .catch(() => ({ ok: false, error: "Erro ao interpretar resposta." }));
+        .catch(() => ({ error: "Erro ao interpretar resposta do servidor." }));
 
       if (!res.ok || body?.error) {
-        console.error("Erro ao enviar:", body);
-        setSendMessage(
-          body?.error || "Não foi possível enviar agora. Tente novamente."
-        );
+        // --- INÍCIO DO AJUSTE DE DIAGNÓSTICO ---
+        // Agora, o console.error inclui o status HTTP para melhor diagnóstico
+        console.error("Erro ao enviar:", { body, status: res.status, statusText: res.statusText });
+        
+        let errorMsg = body?.error;
+
+        // Se a API não enviou um 'error' field, criamos uma mensagem mais informativa
+        if (!errorMsg) {
+            errorMsg = `Falha na requisição (Status: ${res.status}). Verifique o log do seu servidor ou a URL da API.`;
+        }
+        
+        setSendMessage(errorMsg || "Não foi possível enviar agora. Tente novamente.");
+        // --- FIM DO AJUSTE DE DIAGNÓSTICO ---
+
         return;
       }
 
